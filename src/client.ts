@@ -159,8 +159,12 @@ function renderBill(bill: HTMLElement): void {
   const outputCost = Number.isFinite(view.outputCost) ? (view.outputCost as number) : 0
   const total = cost + missCost + outputCost
   const symbol = view.currency === 'USD' ? '$' : '¥'
-  const tierText =
+  const tierLabel =
     typeof view.tier === 'string' && view.tier in TIER_LABEL ? TIER_LABEL[view.tier] : '估算'
+  const tierText =
+    typeof view.model === 'string' && view.model !== ''
+      ? `${tierLabel} · ${view.model}`
+      : tierLabel
 
   // 计时级别的三块明细：步、轮、会话。每块是标题行加总额与总 token，下面缩进细列缓存命中、未命中、输出三行，各带 token 与金额。
   const detailRows = (o: { hitTok: number; missTok: number; outTok: number;
@@ -276,7 +280,7 @@ function renderBill(bill: HTMLElement): void {
   }
   put(srows)
 
-  // 底部小字只保留峰谷价标注，轮次、模型、命中率与网页最下方统计行重复，用户反馈砍掉。
+  // 底部小字只保留峰谷价标注附模型名，轮次、模型、命中率与网页最下方统计行重复，用户反馈砍掉。
   const foot = doc.createElement('div')
   foot.className = 'dshcb_foot'
   foot.textContent = tierText
