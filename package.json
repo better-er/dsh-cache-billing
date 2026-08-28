@@ -1,0 +1,51 @@
+{
+  "name": "dsh-cache-billing",
+  "version": "0.1.0",
+  "description": "缓存账单：上下文圆环弹层里实时算账——当前步/当前轮/会话累计三块明细，缓存命中/未命中/输出各带 token 与金额，峰谷自动计价，第三方中转照常记账，专治『缓存命中率 100% 却越用越贵』",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "billing",
+    "cache-hit",
+    "cost",
+    "peak-offpeak"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/better-er/dsh-cache-billing.git"
+  },
+  "author": "betterer",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/index.js.map",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "zod": "^4.4.3"
+  }
+}
