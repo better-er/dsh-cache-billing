@@ -11,7 +11,7 @@
 
 import * as React from 'react'
 
-/** 样式注入标识（防重复注入）。 */
+/** 样式注入标识，防重复注入。 */
 const CSS_ID = 'dsh-cache-billing-css'
 
 /** 账单区块样式：排版语言复刻官方弹层，顶部细分隔线与官方 rows 区隔。 */
@@ -287,7 +287,7 @@ function renderBill(bill: HTMLElement): void {
   put(foot)
 }
 
-/** 在官方弹层末尾贴上（或刷新）账单区块。 */
+/** 在官方弹层末尾贴上或刷新账单区块。 */
 function ensureBill(panel: HTMLElement): void {
   let bill = panel.querySelector<HTMLElement>(':scope > .dshcb_bill')
   if (bill === null) {
@@ -298,7 +298,7 @@ function ensureBill(panel: HTMLElement): void {
   renderBill(bill)
 }
 
-/** 刷新当前文档中所有已打开的官方弹层（通常至多一个）。 */
+/** 刷新当前文档中所有已打开的官方弹层，通常至多一个。 */
 function refreshOpenPanels(): void {
   if (typeof document === 'undefined') return
   const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]')
