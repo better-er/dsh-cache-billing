@@ -51,13 +51,19 @@ DSH 的上下文圆环是给"上下文用了多少"看的，可真正该看的�
 
 ## 安装
 
+**从 GitHub 安装**：源码在 `src/`，`lib/` 不入仓库，安装时 npm 会触发 `prepare` 脚本现场构建。
+
 ```powershell
 dsh plugin --profile web add github:better-er/dsh-cache-billing
 ```
 
-或安装 npm 发布的版本：`dsh plugin --profile web add dsh-cache-billing`。
+**从 npm 安装**：包内已含构建产物 `lib/index.js` 与 `lib/client.js`，安装时不再构建。
 
-一条命令装完即生效，自动挂载，重启 DSH web 后启用，无需手工编辑任何文件。
+```powershell
+dsh plugin --profile web add dsh-cache-billing
+```
+
+两种方式装完都会自动挂载，重启 DSH web 后启用，无需手工编辑任何文件。
 
 ## 卸载
 
@@ -71,7 +77,7 @@ dsh plugin --profile web remove dsh-cache-billing
 
 - 是**标准形态的 dsh 主机加客户端双半身插件**：host 投影层在服务端折叠事件记账，`./client` 把账单贴进官方上下文弹层。
 - host 侧用 `sessionProjections` 实现：会话内的步、轮、会话累计三级账目都由投影层按事件时刻的费率逐笔核算，`apply` 返回同一引用即无变化。
-- 无构建：`lib/index.js` 与 `lib/client.js` 均为源码即产物，`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改完即用。
+- host 侧由 `src/index.ts` 经 esbuild 构建到 `lib/index.js`，client 侧由 `src/client.ts` 构建到 `lib/client.js`；`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改源码后执行 `npm run build` 重建。
 - 账目只认 `usage` 的 input / cacheRead / cacheWrite / output 四类 token，本地估算，实际扣费以账单为准。
 - 价格、峰谷时段都写在 `src/index.ts` 的价目表里，调整后重建即可。
 
