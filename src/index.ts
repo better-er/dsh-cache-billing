@@ -22,7 +22,7 @@ export const inject = ['sessionProjections']
 interface RateRow {
   /** 缓存命中输入单价 */
   cacheHit: number
-  /** 未命中输入单价（含缓存写入） */
+  /** 未命中输入单价，含缓存写入 */
   cacheMiss: number
   /** 输出单价 */
   output: number

@@ -74,7 +74,6 @@ dsh plugin --profile web remove dsh-cache-billing
 - 无构建：`lib/index.js` 与 `lib/client.js` 均为源码即产物，`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改完即用。
 - 账目只认 `usage` 的 input / cacheRead / cacheWrite / output 四类 token，本地估算，实际扣费以账单为准。
 - 价格、峰谷时段都写在 `src/index.ts` 的价目表里，调整后重建即可。
-- 硬性约束：`lib/client.js` 的 `factory` 必须以 `return module.exports` 结尾，否则模块导出为 `undefined`，DSH 启动即 fail-loud。
 
 ## License
 
