@@ -66,6 +66,7 @@ interface CacheBillingView {
   hitRate?: number | null
   model?: string | null
   provider?: string | null
+  matchedModel?: string | null
   tier?: string | null
   unitPricePerM?: number | null
   turn?: number | null
@@ -161,10 +162,12 @@ function renderBill(bill: HTMLElement): void {
   const symbol = view.currency === 'USD' ? '$' : '¥'
   const tierLabel =
     typeof view.tier === 'string' && view.tier in TIER_LABEL ? TIER_LABEL[view.tier] : '估算'
-  const tierText =
-    typeof view.model === 'string' && view.model !== ''
-      ? `${tierLabel} · ${view.model}`
-      : tierLabel
+  const pricingModel = view.matchedModel ?? 'deepseek-v4-flash'
+  const actualModel = view.model
+  const modelsDiffer = typeof actualModel === 'string' && actualModel !== '' && actualModel !== pricingModel
+  const tierText = modelsDiffer
+    ? tierLabel + ' · 按 ' + pricingModel + ' 计价 · 实际运行 ' + actualModel
+    : tierLabel + ' · 按 ' + pricingModel + ' 计价'
 
   // 计时级别的三块明细：步、轮、会话。每块是标题行加总额与总 token，下面缩进细列缓存命中、未命中、输出三行，各带 token 与金额。
   const detailRows = (o: { hitTok: number; missTok: number; outTok: number;
