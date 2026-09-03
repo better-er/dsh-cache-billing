@@ -16,6 +16,7 @@
     "url": "git+https://github.com/better-er/dsh-cache-billing.git"
   },
   "author": "betterer",
+  "packageManager": "pnpm@9.15.9",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -43,10 +44,13 @@
   "scripts": {
     "prepare": "node build.mjs",
     "build": "node build.mjs",
-    "watch": "node build.mjs --watch"
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/react": "^19.2.18",
     "esbuild": "^0.25.0",
+    "typescript": "^5.5.0",
     "zod": "^4.4.3"
   }
 }

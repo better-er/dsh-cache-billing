@@ -56,16 +56,16 @@ function isPeakBeijing(timeMs: number): boolean {
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
 }
 
-/** 模型在某时刻的费率行：先精确匹配，再用后缀匹配吃掉带命名空间前缀的名字。 */
-function rateOf(model: string | null, timeMs: number): { row: RateRow; tier: Tier } {
+/** 模型在某时刻的费率行：先精确匹配，再用后缀匹配吃掉带命名空间前缀的名字。返回实际使用的费率和模型名。 */
+function rateOf(model: string | null, timeMs: number): { row: RateRow; tier: Tier; matchedModel: string } {
   const key = (model ?? '').toLowerCase()
   const peak = isPeakBeijing(timeMs)
   const table = peak ? PEAK_RATES : OFFPEAK_RATES
-  if (key in table) return { row: table[key], tier: peak ? 'peak' : 'offPeak' }
+  if (key in table) return { row: table[key], tier: peak ? 'peak' : 'offPeak', matchedModel: key }
   for (const [suffix, row] of Object.entries(table)) {
-    if (key.endsWith(suffix)) return { row, tier: peak ? 'peak' : 'offPeak' }
+    if (key.endsWith(suffix)) return { row, tier: peak ? 'peak' : 'offPeak', matchedModel: suffix }
   }
-  return { row: FALLBACK, tier: peak ? 'peak' : 'offPeak' }
+  return { row: FALLBACK, tier: peak ? 'peak' : 'offPeak', matchedModel: 'deepseek-v4-flash' }
 }
 
 const round9 = (n: number): number => Math.round(n * 1e9) / 1e9
@@ -402,6 +402,7 @@ export function apply(ctx: any, _config: any): void {
           hitRate: z.number().nullable(),
           model: z.string().nullable(),
           provider: z.string().nullable(),
+          matchedModel: z.string().nullable(),
           tier: z.enum(['peak', 'offPeak']).nullable(),
           unitPricePerM: z.number().nullable(),
           turn: z.number().int().nullable(),
@@ -459,6 +460,7 @@ export function apply(ctx: any, _config: any): void {
               hitRate: null,
               model: state.model,
               provider: state.provider,
+              matchedModel: null,
               tier: null,
               unitPricePerM: null,
               turn: null,
@@ -484,7 +486,7 @@ export function apply(ctx: any, _config: any): void {
             }
           }
           const totalInput = s.inputTokens + s.cacheReadTokens + s.cacheWriteTokens
-          const { row, tier } = rateOf(s.model, s.time)
+          const { row, tier, matchedModel } = rateOf(s.model, s.time)
           const cost = round9((s.cacheReadTokens * row.cacheHit) / 1e6)
           const missCost = round9(((s.inputTokens + s.cacheWriteTokens) * row.cacheMiss) / 1e6)
           const outputCost = round9((s.outputTokens * row.output) / 1e6)
@@ -502,6 +504,7 @@ export function apply(ctx: any, _config: any): void {
               totalInput > 0 ? Math.round((s.cacheReadTokens / totalInput) * 1000) / 10 : null,
             model: s.model,
             provider: s.provider,
+            matchedModel,
             tier,
             unitPricePerM: row.cacheHit,
             turn: s.turn,
