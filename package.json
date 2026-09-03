@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-billing",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "缓存账单：上下文圆环弹层里实时算账——当前步/当前轮/会话累计三块明细，缓存命中/未命中/输出各带 token 与金额，峰谷自动计价，第三方中转照常记账，专治『缓存命中率 100% 却越用越贵』",
   "keywords": [
     "deepseek-harness",
