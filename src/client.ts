@@ -1,4 +1,4 @@
-/**
+﻿/**
  * dsh-cache-billing — 缓存账单浏览器端。
  *
  * 不再自带任何按钮或占位行：官方上下文圆环点开的弹层本来就是「这个会话用了多少」的语义，缓存账单的「这步花了多少、要不要换窗口」语义与之天然同源，用户拍板就该放到那里。因此监听官方弹层的打开，把账单区块直接贴进去。
@@ -66,6 +66,7 @@ interface CacheBillingView {
   hitRate?: number | null
   model?: string | null
   provider?: string | null
+  matchedModel?: string | null
   tier?: string | null
   unitPricePerM?: number | null
   turn?: number | null
@@ -161,10 +162,18 @@ function renderBill(bill: HTMLElement): void {
   const symbol = view.currency === 'USD' ? '$' : '¥'
   const tierLabel =
     typeof view.tier === 'string' && view.tier in TIER_LABEL ? TIER_LABEL[view.tier] : '估算'
-  const tierText =
-    typeof view.model === 'string' && view.model !== ''
-      ? `${tierLabel} · ${view.model}`
-      : tierLabel
+  const tierText = (() => {
+    const actualModel = view.model
+    const billingModel = view.matchedModel
+    if (typeof billingModel === 'string' && billingModel !== '') {
+      if (typeof actualModel === 'string' && actualModel !== '' && actualModel !== billingModel) {
+        return `${tierLabel} · 按 ${billingModel} 计价（实际运行 ${actualModel}）`
+      } else {
+        return `${tierLabel} · ${billingModel}`
+      }
+    }
+    return tierLabel
+  })()
 
   // 计时级别的三块明细：步、轮、会话。每块是标题行加总额与总 token，下面缩进细列缓存命中、未命中、输出三行，各带 token 与金额。
   const detailRows = (o: { hitTok: number; missTok: number; outTok: number;
@@ -302,9 +311,9 @@ function ensureBill(panel: HTMLElement): void {
 function refreshOpenPanels(): void {
   if (typeof document === 'undefined') return
   const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"]')
-  for (const dlg of dialogs) {
+  dialogs.forEach(dlg => {
     if (isContextPanel(dlg)) ensureBill(dlg)
-  }
+  })
 }
 
 /** 监听官方弹层出现：流式期间 mutation 频繁，这里只做轻量子树扫描，命中判定失败的开销是一次 aria-label 读取，可忽略。 */
@@ -314,21 +323,21 @@ export function startPanelBridge(): () => void {
   }
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
+      mutation.addedNodes.forEach(node => {
         if (isContextPanel(node)) {
           ensureBill(node)
           return
         }
         if (node instanceof HTMLElement) {
           const dialogs = node.querySelectorAll<HTMLElement>('[role="dialog"]')
-          for (const dlg of dialogs) {
+          dialogs.forEach(dlg => {
             if (isContextPanel(dlg)) {
               ensureBill(dlg)
               return
             }
-          }
+          })
         }
-      }
+      })
     }
   })
   observer.observe(document.body, { childList: true, subtree: true })
