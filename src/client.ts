@@ -162,7 +162,7 @@ function renderBill(bill: HTMLElement): void {
   const symbol = view.currency === 'USD' ? '$' : '¥'
   const tierLabel =
     typeof view.tier === 'string' && view.tier in TIER_LABEL ? TIER_LABEL[view.tier] : '估算'
-  const pricingModel = view.matchedModel ?? 'deepseek-v4-flash'
+  const pricingModel = view.matchedModel ?? 'deepseek-v4.1-flash'
   const actualModel = view.model
   const modelsDiffer = typeof actualModel === 'string' && actualModel !== '' && actualModel !== pricingModel
   const tierText = modelsDiffer

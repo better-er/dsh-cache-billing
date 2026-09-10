@@ -5,7 +5,7 @@
  *
  * 一轮的定义：每次请求大模型 API 算一轮。人类说话之后 AI 可能多次调用工具，工具结果又返回给大模型请求 API，每次请求算一轮。会话事件流中即 turn 和 step：同一 step 的 chunk 流式样本被 assistant/message 最终样本替换，官方 token-meter 同款替换语义；新 step 出现即覆盖上一轮，只显示当前步。turn 是一个用户消息内的多步合计，切换用户消息时重置。
  *
- * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京 9–12、14–18 点为峰，其余半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，flash 与 pro 单价不同，认错模型就算错钱。第三方中转同样显示：provider 非空即放行，模型命中价目表就按估算金额计价。
+ * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京 9–12、14–18 点为峰，其余半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，当前价目表只有 deepseek-v4.1-flash 一个模型，认错模型就算错钱。第三方中转同样显示：provider 非空即放行，模型命中价目表就按估算金额计价。
  */
 
 import { z } from 'zod'
@@ -16,7 +16,7 @@ export const name = 'dsh-cache-billing'
 /** 必需服务：sessionProjections 由 @deepseek-ai/dsh-session-projection 提供。 */
 export const inject = ['sessionProjections']
 
-// ── 价格表：CNY 元 / 百万 token，2026-08-17 官方峰谷价，多插件源码交叉验证一致 ──
+// ── 价格表：CNY 元 / 百万 token，现只有 deepseek-v4.1-flash 一个模型，低谷价 0.02 / 1 / 4，高峰期翻倍 ──
 // 时段政策：2026-08-22 起周六日全天谷价，仅工作日有峰价，用户转发官方邮件告知。
 
 interface RateRow {
@@ -28,19 +28,16 @@ interface RateRow {
   output: number
 }
 
-/** 峰谷价模型表，无平价模型，所有模型都参与峰谷，vision-exp 与 flash 同价。 */
+/** 高峰价模型表，工作日北京 09:00–12:00、14:00–18:00 生效，是低谷价的两倍。 */
 const PEAK_RATES: Record<string, RateRow> = {
-  'deepseek-v4-flash': { cacheHit: 0.1, cacheMiss: 3, output: 9 },
-  'deepseek-v4-flash-vision-exp': { cacheHit: 0.1, cacheMiss: 3, output: 9 },
-  'deepseek-v4-pro': { cacheHit: 0.3, cacheMiss: 9, output: 27 },
+  'deepseek-v4.1-flash': { cacheHit: 0.04, cacheMiss: 2, output: 8 },
 }
+/** 低谷价模型表，其余时段与周六日全天生效，是价目表的基准列。 */
 const OFFPEAK_RATES: Record<string, RateRow> = {
-  'deepseek-v4-flash': { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 },
-  'deepseek-v4-flash-vision-exp': { cacheHit: 0.05, cacheMiss: 1.5, output: 4.5 },
-  'deepseek-v4-pro': { cacheHit: 0.15, cacheMiss: 4.5, output: 13.5 },
+  'deepseek-v4.1-flash': { cacheHit: 0.02, cacheMiss: 1, output: 4 },
 }
-/** 兜底价：未知模型按 flash 峰谷价估算，宁近似不空转。 */
-const FALLBACK: RateRow = PEAK_RATES['deepseek-v4-flash']
+/** 兜底模型：模型名完全对不上价目表时，按唯一模型的当前时段价估算，宁近似不空转。 */
+const FALLBACK_MODEL = 'deepseek-v4.1-flash'
 
 type Tier = 'peak' | 'offPeak'
 
@@ -56,16 +53,23 @@ function isPeakBeijing(timeMs: number): boolean {
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
 }
 
-/** 模型在某时刻的费率行：先精确匹配，再用后缀匹配吃掉带命名空间前缀的名字。返回实际使用的费率和模型名。 */
+/**
+ * 模型在某时刻的费率行：先精确匹配，再整体后缀匹配，最后包含匹配，吃掉带命名空间前缀或过期后缀的名字，例如实际运行的 deepseek-v4.1-flash-expires-on-0910 命中 deepseek-v4.1-flash。
+ * 三级都不中才兜底，且兜底按当前时段的唯一模型价，不再固定按峰价，免得谷时段凭空翻倍。返回实际使用的费率、时段与计价模型名。
+ */
 function rateOf(model: string | null, timeMs: number): { row: RateRow; tier: Tier; matchedModel: string } {
   const key = (model ?? '').toLowerCase()
   const peak = isPeakBeijing(timeMs)
+  const tier: Tier = peak ? 'peak' : 'offPeak'
   const table = peak ? PEAK_RATES : OFFPEAK_RATES
-  if (key in table) return { row: table[key], tier: peak ? 'peak' : 'offPeak', matchedModel: key }
-  for (const [suffix, row] of Object.entries(table)) {
-    if (key.endsWith(suffix)) return { row, tier: peak ? 'peak' : 'offPeak', matchedModel: suffix }
+  if (key in table) return { row: table[key], tier, matchedModel: key }
+  for (const [name, row] of Object.entries(table)) {
+    if (key.endsWith(name)) return { row, tier, matchedModel: name }
   }
-  return { row: FALLBACK, tier: peak ? 'peak' : 'offPeak', matchedModel: 'deepseek-v4-flash' }
+  for (const [name, row] of Object.entries(table)) {
+    if (key.includes(name)) return { row, tier, matchedModel: name }
+  }
+  return { row: table[FALLBACK_MODEL], tier, matchedModel: FALLBACK_MODEL }
 }
 
 const round9 = (n: number): number => Math.round(n * 1e9) / 1e9
@@ -163,8 +167,8 @@ export function apply(ctx: any, _config: any): void {
     // 没有 wire 即 host-only 单元，状态不进客户端快照，useProjection 永远拿不到值。
     projectionCtx.sessionProjections.register({
       key: 'cacheBilling',
-      // v5：state.totals/turn 增加 cacheReadTokens 累计，明细行 token 展示，旧持久化行作废重放
-      stateVersion: 5,
+      // v6：价目表换成 deepseek-v4.1-flash 单一模型新价，旧持久化金额按旧价记的，作废重放用新价重算
+      stateVersion: 6,
       stateSchema: z.object({
         provider: z.string().nullable(),
         model: z.string().nullable(),
