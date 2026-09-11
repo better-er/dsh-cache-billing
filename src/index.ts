@@ -5,7 +5,7 @@
  *
  * 一轮的定义：每次请求大模型 API 算一轮。人类说话之后 AI 可能多次调用工具，工具结果又返回给大模型请求 API，每次请求算一轮。会话事件流中即 turn 和 step：同一 step 的 chunk 流式样本被 assistant/message 最终样本替换，官方 token-meter 同款替换语义；新 step 出现即覆盖上一轮，只显示当前步。turn 是一个用户消息内的多步合计，切换用户消息时重置。
  *
- * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京 9–12、14–18 点为峰，其余半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，当前价目表只有 deepseek-v4.1-flash 一个模型，认错模型就算错钱。第三方中转同样显示：provider 非空即放行，模型命中价目表就按估算金额计价。
+ * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京 9–12、14–18 点为峰，其余半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，账目只按 DeepSeek-V4.1-Flash 一个模型计价，模型名认官方现名 deepseek-flash、历史旧名 deepseek-v4-flash 与 deepseek-v4-flash-vision-exp、以及现名 deepseek-v4.1-flash 及其带后缀的变体，界面统一显示 DeepSeek-V4.1-Flash。第三方中转同样显示：provider 非空即放行，模型名不认时按 Flash 价估算并标注实际运行模型。
  */
 
 import { z } from 'zod'
@@ -16,7 +16,7 @@ export const name = 'dsh-cache-billing'
 /** 必需服务：sessionProjections 由 @deepseek-ai/dsh-session-projection 提供。 */
 export const inject = ['sessionProjections']
 
-// ── 价格表：CNY 元 / 百万 token，现只有 deepseek-v4.1-flash 一个模型，低谷价 0.02 / 1 / 4，高峰期翻倍 ──
+// ── 价格表：CNY 元 / 百万 token，全程只按 DeepSeek-V4.1-Flash 一个模型计价，低谷价 0.02 / 1 / 4，高峰期翻倍 ──
 // 时段政策：2026-08-22 起周六日全天谷价，仅工作日有峰价，用户转发官方邮件告知。
 
 interface RateRow {
@@ -28,16 +28,36 @@ interface RateRow {
   output: number
 }
 
-/** 高峰价模型表，工作日北京 09:00–12:00、14:00–18:00 生效，是低谷价的两倍。 */
-const PEAK_RATES: Record<string, RateRow> = {
-  'deepseek-v4.1-flash': { cacheHit: 0.04, cacheMiss: 2, output: 8 },
+/** 唯一计价模型：DeepSeek-V4.1-Flash。aliases 是模型名识别白名单，命中即按本模型计价并在界面显示 label。 */
+interface BillingModel {
+  /** 规范名，仅内部用 */
+  key: string
+  /** 界面显示名 */
+  label: string
+  /** 模型名白名单，小写比较，支持精确、后缀、包含三级匹配 */
+  aliases: readonly string[]
+  /** 高峰价，工作日北京 09:00–12:00、14:00–18:00 生效，是低谷价的两倍 */
+  peak: RateRow
+  /** 低谷价，其余时段与周六日全天生效，是价目表的基准列 */
+  offPeak: RateRow
 }
-/** 低谷价模型表，其余时段与周六日全天生效，是价目表的基准列。 */
-const OFFPEAK_RATES: Record<string, RateRow> = {
-  'deepseek-v4.1-flash': { cacheHit: 0.02, cacheMiss: 1, output: 4 },
+
+/**
+ * 账目只认 DeepSeek-V4.1-Flash。官方现行模型名为 deepseek-flash，旧名 deepseek-v4-flash 与 deepseek-v4-flash-vision-exp 仍可调用但同样由 V4.1-Flash 提供服务，
+ * 历史现名 deepseek-v4.1-flash 及带 expires-on 等后缀的变体一并认下，全部按 Flash 价计价并统一显示 label。
+ */
+const MODEL: BillingModel = {
+  key: 'deepseek-v4.1-flash',
+  label: 'DeepSeek-V4.1-Flash',
+  aliases: [
+    'deepseek-v4.1-flash',
+    'deepseek-flash',
+    'deepseek-v4-flash',
+    'deepseek-v4-flash-vision-exp',
+  ],
+  peak: { cacheHit: 0.04, cacheMiss: 2, output: 8 },
+  offPeak: { cacheHit: 0.02, cacheMiss: 1, output: 4 },
 }
-/** 兜底模型：模型名完全对不上价目表时，按唯一模型的当前时段价估算，宁近似不空转。 */
-const FALLBACK_MODEL = 'deepseek-v4.1-flash'
 
 type Tier = 'peak' | 'offPeak'
 
@@ -54,22 +74,21 @@ function isPeakBeijing(timeMs: number): boolean {
 }
 
 /**
- * 模型在某时刻的费率行：先精确匹配，再整体后缀匹配，最后包含匹配，吃掉带命名空间前缀或过期后缀的名字，例如实际运行的 deepseek-v4.1-flash-expires-on-0910 命中 deepseek-v4.1-flash。
- * 三级都不中才兜底，且兜底按当前时段的唯一模型价，不再固定按峰价，免得谷时段凭空翻倍。返回实际使用的费率、时段与计价模型名。
+ * 模型在某时刻的费率行。价目表只有 DeepSeek-V4.1-Flash 一个模型，所以永远返回它的费率；
+ * matched 表示模型名是否命中 aliases 白名单，精确、后缀、包含三级任一命中即为 true，带命名空间前缀或过期后缀的变体例如 deepseek-v4.1-flash-expires-on-0910 由此命中。
+ * 三级都不中走估算：仍按 Flash 当前时段价，matched 为 false，客户端据此标注实际运行模型。返回费率、时段、显示名与命中标记。
  */
-function rateOf(model: string | null, timeMs: number): { row: RateRow; tier: Tier; matchedModel: string } {
+function rateOf(
+  model: string | null,
+  timeMs: number,
+): { row: RateRow; tier: Tier; matchedModel: string; matched: boolean } {
   const key = (model ?? '').toLowerCase()
-  const peak = isPeakBeijing(timeMs)
-  const tier: Tier = peak ? 'peak' : 'offPeak'
-  const table = peak ? PEAK_RATES : OFFPEAK_RATES
-  if (key in table) return { row: table[key], tier, matchedModel: key }
-  for (const [name, row] of Object.entries(table)) {
-    if (key.endsWith(name)) return { row, tier, matchedModel: name }
-  }
-  for (const [name, row] of Object.entries(table)) {
-    if (key.includes(name)) return { row, tier, matchedModel: name }
-  }
-  return { row: table[FALLBACK_MODEL], tier, matchedModel: FALLBACK_MODEL }
+  const tier: Tier = isPeakBeijing(timeMs) ? 'peak' : 'offPeak'
+  const row = tier === 'peak' ? MODEL.peak : MODEL.offPeak
+  const matched = MODEL.aliases.some(
+    (alias) => key === alias || key.endsWith(alias) || key.includes(alias),
+  )
+  return { row, tier, matchedModel: MODEL.label, matched }
 }
 
 const round9 = (n: number): number => Math.round(n * 1e9) / 1e9
@@ -406,7 +425,10 @@ export function apply(ctx: any, _config: any): void {
           hitRate: z.number().nullable(),
           model: z.string().nullable(),
           provider: z.string().nullable(),
+          /** 计价模型显示名，恒为 DeepSeek-V4.1-Flash */
           matchedModel: z.string().nullable(),
+          /** 实际模型名是否命中 Flash 白名单，false 即按 Flash 价估算 */
+          modelMatched: z.boolean(),
           tier: z.enum(['peak', 'offPeak']).nullable(),
           unitPricePerM: z.number().nullable(),
           turn: z.number().int().nullable(),
@@ -465,6 +487,7 @@ export function apply(ctx: any, _config: any): void {
               model: state.model,
               provider: state.provider,
               matchedModel: null,
+              modelMatched: false,
               tier: null,
               unitPricePerM: null,
               turn: null,
@@ -490,7 +513,7 @@ export function apply(ctx: any, _config: any): void {
             }
           }
           const totalInput = s.inputTokens + s.cacheReadTokens + s.cacheWriteTokens
-          const { row, tier, matchedModel } = rateOf(s.model, s.time)
+          const { row, tier, matchedModel, matched } = rateOf(s.model, s.time)
           const cost = round9((s.cacheReadTokens * row.cacheHit) / 1e6)
           const missCost = round9(((s.inputTokens + s.cacheWriteTokens) * row.cacheMiss) / 1e6)
           const outputCost = round9((s.outputTokens * row.output) / 1e6)
@@ -509,6 +532,7 @@ export function apply(ctx: any, _config: any): void {
             model: s.model,
             provider: s.provider,
             matchedModel,
+            modelMatched: matched,
             tier,
             unitPricePerM: row.cacheHit,
             turn: s.turn,
