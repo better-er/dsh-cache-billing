@@ -5,7 +5,7 @@
  *
  * 一轮的定义：每次请求大模型 API 算一轮。人类说话之后 AI 可能多次调用工具，工具结果又返回给大模型请求 API，每次请求算一轮。会话事件流中即 turn 和 step：同一 step 的 chunk 流式样本被 assistant/message 最终样本替换，官方 token-meter 同款替换语义；新 step 出现即覆盖上一轮，只显示当前步。turn 是一个用户消息内的多步合计，切换用户消息时重置。
  *
- * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京 9–12、14–18 点为峰，其余半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，账目只按 DeepSeek-V4.1-Flash 一个模型计价，模型名认官方现名 deepseek-flash、历史旧名 deepseek-v4-flash 与 deepseek-v4-flash-vision-exp、以及现名 deepseek-v4.1-flash 及其带后缀的变体，界面统一显示 DeepSeek-V4.1-Flash。第三方中转同样显示：provider 非空即放行，模型名不认时按 Flash 价估算并标注实际运行模型。
+ * 计价口径：本步 cacheReadTokens × 该模型该时刻的缓存命中单价 ÷ 1e6。缓存命中 token 读 usage.cacheReadTokens，DSH adapter 映射自 DeepSeek API 响应的 prompt_cache_hit_tokens。峰谷判定只用事件时间戳做 UTC+8 数学换算，北京工作日 9–12、14–18 点为峰，周末与中国法定节假日全天半价，与系统时区无关，本机系统时间不可信。模型从 request/header、request/context 跟踪，assistant/message 的 message.source.model 校正，账目只按 DeepSeek-V4.1-Flash 一个模型计价，模型名认官方现名 deepseek-flash、历史旧名 deepseek-v4-flash 与 deepseek-v4-flash-vision-exp、以及现名 deepseek-v4.1-flash 及其带后缀的变体，界面统一显示 DeepSeek-V4.1-Flash。第三方中转同样显示：provider 非空即放行，模型名不认时按 Flash 价估算并标注实际运行模型。
  */
 
 import { z } from 'zod'
@@ -17,7 +17,7 @@ export const name = 'dsh-cache-billing'
 export const inject = ['sessionProjections']
 
 // ── 价格表：CNY 元 / 百万 token，全程只按 DeepSeek-V4.1-Flash 一个模型计价，低谷价 0.02 / 1 / 4，高峰期翻倍 ──
-// 时段政策：2026-08-22 起周六日全天谷价，仅工作日有峰价，用户转发官方邮件告知。
+// 时段政策：2026-08-22 起周六日全天谷价，仅工作日有峰价，用户转发官方邮件告知；官方定价页注明中国法定节假日全天亦为谷价。
 
 interface RateRow {
   /** 缓存命中输入单价 */
@@ -36,9 +36,9 @@ interface BillingModel {
   label: string
   /** 模型名白名单，小写比较，支持精确、后缀、包含三级匹配 */
   aliases: readonly string[]
-  /** 高峰价，工作日北京 09:00–12:00、14:00–18:00 生效，是低谷价的两倍 */
+  /** 高峰价，北京工作日 09:00–12:00、14:00–18:00 生效，法定节假日全天不算峰，是低谷价的两倍 */
   peak: RateRow
-  /** 低谷价，其余时段与周六日全天生效，是价目表的基准列 */
+  /** 低谷价，其余时段、周六日与中国法定节假日全天生效，是价目表的基准列 */
   offPeak: RateRow
 }
 
@@ -62,14 +62,41 @@ const MODEL: BillingModel = {
 type Tier = 'peak' | 'offPeak'
 
 /**
- * 时刻是否为北京高峰。纯 UTC+8 数学换算，与系统时区无关，红线。政策：周六日全天谷价，仅工作日有峰价；工作日峰段仍为 09:00–12:00、14:00–18:00 北京时间。
+ * 中国法定节假日放假日名单，北京时间 YYYY-MM-DD。2026 年国务院放假安排共 33 天，取自 github.com/NateScarlet/holiday-cn。
+ * 只收放假日，不收调休补班的周末——周末本就全天谷价，补班与否不影响判定。
+ * 只内置 2026 年；新年度安排公布后在此补日期。表外年份退化为只认周末，与未加节假日前的行为一致。
+ */
+const HOLIDAYS_2026: ReadonlySet<string> = new Set([
+  // 元旦
+  '2026-01-01', '2026-01-02', '2026-01-03',
+  // 春节
+  '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19',
+  '2026-02-20', '2026-02-21', '2026-02-22', '2026-02-23',
+  // 清明
+  '2026-04-04', '2026-04-05', '2026-04-06',
+  // 劳动节
+  '2026-05-01', '2026-05-02', '2026-05-03', '2026-05-04', '2026-05-05',
+  // 端午
+  '2026-06-19', '2026-06-20', '2026-06-21',
+  // 中秋
+  '2026-09-25', '2026-09-26', '2026-09-27',
+  // 国庆
+  '2026-10-01', '2026-10-02', '2026-10-03', '2026-10-04', '2026-10-05',
+  '2026-10-06', '2026-10-07',
+])
+
+/**
+ * 时刻是否为北京高峰。纯 UTC+8 数学换算，与系统时区无关，红线。政策：周末与中国法定节假日全天谷价，仅工作日有峰价；工作日峰段为 09:00–12:00、14:00–18:00 北京时间。
  */
 function isPeakBeijing(timeMs: number): boolean {
-  const shifted = timeMs + 8 * 3600 * 1000
-  const shiftedDate = new Date(shifted)
-  const day = shiftedDate.getUTCDay() // 0=周日 6=周六，同一 shifted 时刻取星期与小时，跨日一致
+  const shifted = new Date(timeMs + 8 * 3600 * 1000)
+  const day = shifted.getUTCDay() // 0=周日 6=周六，同一 shifted 时刻取星期与小时，跨日一致
   if (day === 0 || day === 6) return false // 周末全天谷价
-  const hour = shiftedDate.getUTCHours()
+  // 用 getUTC* 拼北京日历日，不用 toISOString：无效时间戳上后者抛 RangeError 会打断计价，getUTC* 只会拼出不命中的串
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0')
+  const dayOfMonth = String(shifted.getUTCDate()).padStart(2, '0')
+  if (HOLIDAYS_2026.has(`${shifted.getUTCFullYear()}-${month}-${dayOfMonth}`)) return false // 法定节假日全天谷价
+  const hour = shifted.getUTCHours()
   return (hour >= 9 && hour < 12) || (hour >= 14 && hour < 18)
 }
 
@@ -187,6 +214,7 @@ export function apply(ctx: any, _config: any): void {
     projectionCtx.sessionProjections.register({
       key: 'cacheBilling',
       // v6：价目表换成 deepseek-v4.1-flash 单一模型新价，旧持久化金额按旧价记的，作废重放用新价重算
+      // 本次只把峰谷判定纳入 2026 法定节假日，尚无旧账落在节假日时刻，无需重算，故不升 stateVersion
       stateVersion: 6,
       stateSchema: z.object({
         provider: z.string().nullable(),

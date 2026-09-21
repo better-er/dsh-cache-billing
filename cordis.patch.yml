@@ -1,5 +1,5 @@
-# dsh-cache-billing bundle patch: inserts this plugin into a profile's layer stack.
-# Applied when a profile lists this bundle (or wired by dev_install_package).
+# dsh-cache-billing bundle patch：把本插件插进 profile 的 layer stack。
+# profile 引用本 bundle 时应用，dev_install_package 接线时同样生效。
 - insert:
     - id: dsh-cache-billing
       name: 'dsh-cache-billing'
