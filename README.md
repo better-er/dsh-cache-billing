@@ -19,7 +19,7 @@ DSH 的上下文圆环是给「上下文用了多少」看的，可真正该看�
 - **第三方中转也认**：不限定 DeepSeek 官方路由，provider 非空即显示，模型名命中价目表就按估算金额计价。凭空 provider 的路由不会显示。
 - **三块计时级别**：从上到下依次是当前步、当前轮、会话累计。当前步是单次 API 调用，当前轮是本轮内多步累加，会话累计带步数。每块一行标题带总额与总 token，下面缩进细列缓存命中、缓存未命中、输出三行，各带 token 数与金额。
 - **会话累计**：整会话的累计花费，逐笔按各自事件时刻的峰谷费率累加，跨轮不比价。会话块还有缓存失效统计：缓存失效次数与完全失效次数，部分中转会报写入量，一并显示。
-- **峰谷计价自动判定**：工作日高峰时段北京时间 09:00–12:00、14:00–18:00 按峰价，其余时段及周六日全天按谷半价。与系统时区无关，纯事件时刻换算。
+- **峰谷计价自动判定**：工作日高峰时段北京时间 09:00–12:00、14:00–18:00 按峰价，其余时段、周六日及中国法定节假日全天按谷半价。与系统时区无关，纯事件时刻换算。
 - **单一模型计价与显示**：只按 DeepSeek-V4.1-Flash 计价，界面统一显示「按 DeepSeek-V4.1-Flash 计价」。模型名认官方现名 `deepseek-flash`、历史旧名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp`、以及 `deepseek-v4.1-flash` 及其带后缀变体；没命中白名单的模型仍按 Flash 价估算并标注实际运行模型名。低谷价 缓存命中 0.02 / 未命中输入 1 / 输出 4 元每百万 token，高峰翻倍，价格写在 `src/index.ts`。
 - **金额精度分级别**：步四位小数、轮三位、会话两位，尾零不省，便宜到 0.0001 也看得出不是零。
 
@@ -61,7 +61,7 @@ dsh plugin --profile web remove dsh-cache-billing
 - host 侧用 `sessionProjections` 实现：会话内的步、轮、会话累计三级账目都由投影层按事件时刻的费率逐笔核算，`apply` 返回同一引用即无变化。
 - host 侧由 `src/index.ts` 经 esbuild 构建到 `lib/index.js`，client 侧由 `src/client.ts` 构建到 `lib/client.js`；`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改源码后执行 `npm run build` 重建。
 - 账目只认 `usage` 的 input / cacheRead / cacheWrite / output 四类 token，本地估算，实际扣费以账单为准。
-- 价格、峰谷时段、模型名白名单与显示名都写在 `src/index.ts` 的 `MODEL` 常量里，调整后重建即可。
+- 价格、峰谷时段、模型名白名单与显示名都写在 `src/index.ts` 的 `MODEL` 常量里，法定节假日表是同文件的 `HOLIDAYS_2026`，调整后重建即可。
 
 ## License
 
