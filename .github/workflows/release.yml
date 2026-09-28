@@ -1,32 +1,42 @@
 name: Release
 
-# 推送形如 vX.Y.Z 的 tag 时自动发版：
-#   凭 tag 号更新 package.json 版本并提交回 main → 构建 → 发布 npm → 生成 GitHub Release 草稿。
-#   人只需打一个 tag，其余自动衔接。
+# 推送形如 vX.Y.Z 如 v0.1.0 的 tag 时自动发版：先把 package.json 版本兜底对齐到 tag 号，不一致才提交回 main → 类型检查 → 构建 → 发布 npm → 生成 GitHub Release draft。
+# 人只需打一个 tag，其余自动衔接。
 # 注意：npm 发布走 Trusted Publishing，无需 NPM_TOKEN；未在 npm 侧绑定信任关系时发布会失败。
 on:
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
 
-permissions:
-  contents: write
-  id-token: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
+    name: Publish ${{ github.ref_name }} to npm
     runs-on: ubuntu-latest
-    environment: release
+    # id-token: write 供 Trusted Publishing 换取 npm 临时凭证，无需 NPM_TOKEN。
+    # 必须放在 job 级，GitHub 才会向该 job 注入 ACTIONS_ID_TOKEN_REQUEST_*。
+    permissions:
+      contents: write
+      id-token: write
+    # fork 永不触发 tag 发布，仅作为兜底防护。
     if: startsWith(github.ref, 'refs/tags/v')
+    # 绑定 GitHub Actions environment「release」，使 OIDC subject 稳定为 environment:release，npm 侧 Trusted Publisher 需填相同 Environment 名。
+    environment: release
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           # 回写 main 需要完整历史，故拉全量。
           fetch-depth: 0
+          # 默认 GITHUB_TOKEN 在分支保护下会被拒，此处显式传 token。
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # 前置守卫：仅当该 tag 版本尚未发布到 npm 时才继续发版。
-      # 补历史 tag 时对应版本早已在 npm 上，重复 publish 会报错，且版本回写会把 main 改回旧号，
-      # 故已发布则跳过后续所有步骤。npm view 只读 registry，无需凭证。
+      # 补历史 tag 时对应版本早已在 npm 上，重复 publish 会报错，且版本回写会把 main 改回旧号，故已发布则跳过后续所有步骤。
+      # npm view 只读 registry，无需凭证。
       - name: Skip when tag version already published
         id: published
         run: |
@@ -41,12 +51,13 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # 版本号仅凭 tag 号决定，写入 package.json 并提交回 main。
+      # 版本号以源码里的 package.json 为准，正常随改动一起提交，发版前与将要打的 tag 对齐。
+      # 这一步只是兜底：忘改或写错时在此对齐 tag 号，再提交回 main。
       - name: Sync version to main
         if: steps.published.outputs.published != 'true'
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${GITHUB_REF_NAME#v}"          # 去 v 前缀得版本号，如 0.1.0
           echo "target version = $TAG"
 
           # 切到 main 分支再改版本，避免在 detached tag 上提交。
@@ -62,37 +73,60 @@ jobs:
             fs.writeFileSync('./package.json', JSON.stringify(p, null, 2) + '\n');
           " "$TAG"
 
-          # 已是最新版本则无改动，跳过提交；否则提交并推回 main。
+          # 兜底对齐后与 package.json 已一致则无改动，跳过提交；否则提交并推回 main。
           git diff --quiet package.json || {
             git add package.json
             git commit -m "chore: release $TAG 同步 package.json 版本 [skip ci]"
             git push origin main
           }
 
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
         if: steps.published.outputs.published != 'true'
+        uses: pnpm/action-setup@v4
         with:
           version: 9.15.9
-      - uses: actions/setup-node@v4
+
+      # setup-node 的 registry-url 告知 npm 向哪个 registry 换 Trusted Publishing 临时凭证。
+      # node-version 与本地 node -v 锁死同一版本。它同时满足 npm 官方 Trusted Publishing 的下限：捆绑 npm 需大于等于 11.5.1，否则 npm CLI 无法做 OIDC 自动换权，会回退用失效 token 导致 PUT 404 is not in registry。
+      - name: Setup Node
         if: steps.published.outputs.published != 'true'
+        uses: actions/setup-node@v4
         with:
-          # node >= 24 捆绑的 npm >= 11.5.1，npm CLI 才能做 Trusted Publishing 的 OIDC 自动换权；
-          # 低于该版本 npm 不会去换临时凭证，发布会退化成普通未登录而报 ENEEDAUTH。
-          # registry-url 告知 npm 向哪个 registry 换 Trusted Publishing 临时凭证，二者缺一不可。
-          node-version: 24
+          node-version: 26.3.1
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
       - name: Install dependencies
         if: steps.published.outputs.published != 'true'
         run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        if: steps.published.outputs.published != 'true'
+        run: pnpm typecheck
+
       - name: Build
         if: steps.published.outputs.published != 'true'
-        run: pnpm run build
+        run: pnpm build
+
+      # 本插件是双半身且带 sourcemap，产物缺失会在此失败。
+      - name: Verify build outputs
+        if: steps.published.outputs.published != 'true'
+        run: |
+          test -f lib/index.js
+          test -f lib/index.js.map
+          test -f lib/client.js
+          test -f lib/client.js.map
+          test -f cordis.patch.yml
+          echo "构建产物齐全：lib/index.js · lib/index.js.map · lib/client.js · lib/client.js.map · cordis.patch.yml"
+
+      # Trusted Publishing：npm 凭 workflow 的 OIDC 身份直接授权，无需 NPM_TOKEN；--provenance 会在 npm 上附构建来源证明。
       - name: Publish to npm
         if: steps.published.outputs.published != 'true'
-        run: pnpm publish --no-git-checks --provenance --access public
-      - uses: softprops/action-gh-release@v2
+        run: npm publish --provenance --access public
+
+      - name: Create GitHub Release draft
         if: steps.published.outputs.published != 'true'
+        uses: softprops/action-gh-release@v2
         with:
           draft: true
           tag_name: ${{ github.ref_name }}
