@@ -1,0 +1,58 @@
+name: CI
+
+# 每次 push 到主分支、任何 PR 包括来自 fork 的 PR 都自动跑完整检查。
+# 本插件是构建型：src/ 是源码，lib/ 是产物且不入库，因此 CI 必须装依赖再构建。
+# PR 检查即门禁：typecheck / build / 产物校验全绿才允许合并。
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    # fork PR 也可触发；此工作流不读写仓库 secrets，fork 环境下安全。
+    branches:
+      - main
+
+# 同一分支或 PR 上排队的新提交会取消正在跑的旧任务，避免资源浪费。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: typecheck · build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # 版本必须与 package.json 的 packageManager 完全一致，否则 action-setup 会报 Multiple versions of pnpm specified。
+          version: 9.15.9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # 与本地 node -v 锁死同一版本，见工作区 AGENTS.md 的 Node 版本约定。
+          node-version: 26.3.1
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      # 本插件是双半身且带 sourcemap，产物缺失会在此失败。
+      - name: Verify build outputs
+        run: |
+          test -f lib/index.js
+          test -f lib/index.js.map
+          test -f lib/client.js
+          test -f lib/client.js.map
+          test -f cordis.patch.yml
+          echo "构建产物齐全：lib/index.js · lib/index.js.map · lib/client.js · lib/client.js.map · cordis.patch.yml"
