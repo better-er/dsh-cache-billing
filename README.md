@@ -1,4 +1,4 @@
-# dsh·缓存账单插件
+# DSH·缓存账单
 
 参考 [dsh-meow-cachebilling](https://github.com/Phant0Meow/dsh-meow-cachebilling) 的思路重写，默认支持第三方中转与多级账单明细。
 
@@ -59,7 +59,7 @@ dsh plugin --profile web remove dsh-cache-billing
 
 - 是**标准形态的 dsh 主机加客户端双半身插件**：host 投影层在服务端折叠事件记账，`./client` 把账单贴进官方上下文弹层。
 - host 侧用 `sessionProjections` 实现：会话内的步、轮、会话累计三级账目都由投影层按事件时刻的费率逐笔核算，`apply` 返回同一引用即无变化。
-- host 侧由 `src/index.ts` 经 esbuild 构建到 `lib/index.js`，client 侧由 `src/client.ts` 构建到 `lib/client.js`；`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改源码后执行 `npm run build` 重建。
+- host 侧由 `src/index.ts` 经 esbuild 构建到 `lib/index.js`，client 侧由 `src/client.ts` 构建到 `lib/client.js`；`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改源码后执行 `pnpm build` 重建。
 - 账目只认 `usage` 的 input / cacheRead / cacheWrite / output 四类 token，本地估算，实际扣费以账单为准。
 - 价格、峰谷时段、模型名白名单与显示名都写在 `src/index.ts` 的 `MODEL` 常量里，法定节假日表是同文件的 `HOLIDAYS_2026`，调整后重建即可。
 
