@@ -22,6 +22,7 @@ DSH 的上下文圆环是给「上下文用了多少」看的，可真正该看�
 - **峰谷计价自动判定**：工作日高峰时段北京时间 09:00–12:00、14:00–18:00 按峰价，其余时段、周六日及中国法定节假日全天按谷半价。与系统时区无关，纯事件时刻换算。
 - **单一模型计价与显示**：只按 DeepSeek-V4.1-Flash 计价，界面统一显示「按 DeepSeek-V4.1-Flash 计价」。模型名认官方现名 `deepseek-flash`、历史旧名 `deepseek-v4-flash` 与 `deepseek-v4-flash-vision-exp`、以及 `deepseek-v4.1-flash` 及其带后缀变体；没命中白名单的模型仍按 Flash 价估算并标注实际运行模型名。低谷价 缓存命中 0.02 / 未命中输入 1 / 输出 4 元每百万 token，高峰翻倍，价格写在 `src/index.ts`。
 - **金额精度分级别**：步四位小数、轮三位、会话两位，尾零不省，便宜到 0.0001 也看得出不是零。
+- **高峰期圆环换色**：处于峰价时段时，输入框右侧的上下文圆环进度圈换成琥珀色，不用点开弹层就知道现在发请求是峰价。判定按当前北京时刻，每分钟重判一次，与弹层里按事件时刻计价的峰谷文案各管各的。
 
 账单底部小字标注当前是峰价还是谷价，并附「按 DeepSeek-V4.1-Flash 计价」；模型名没命中白名单时小字改为「估算」并标注实际运行模型。
 
@@ -30,6 +31,10 @@ DSH 的上下文圆环是给「上下文用了多少」看的，可真正该看�
 点开输入框右侧的上下文圆环，弹层底部就是账单，跟「上下文用了多少」同屏对看：
 
 ![效果预览](docs/效果预览.webp)
+
+高峰时段圆环本身也会换色，低谷保持原来的灰色，不点开弹层就知道现在按哪档计价：
+
+![高峰环换色预览](docs/高峰环换色预览.webp)
 
 ## 安装
 
@@ -61,7 +66,8 @@ dsh plugin --profile web remove dsh-cache-billing
 - host 侧用 `sessionProjections` 实现：会话内的步、轮、会话累计三级账目都由投影层按事件时刻的费率逐笔核算，`apply` 返回同一引用即无变化。
 - host 侧由 `src/index.ts` 经 esbuild 构建到 `lib/index.js`，client 侧由 `src/client.ts` 构建到 `lib/client.js`；`package.json` 声明 `dsh.client.platform: "web"`、`exports["./client"] → ./lib/client.js`，改源码后执行 `pnpm build` 重建。
 - 账目只认 `usage` 的 input / cacheRead / cacheWrite / output 四类 token，本地估算，实际扣费以账单为准。
-- 价格、峰谷时段、模型名白名单与显示名都写在 `src/index.ts` 的 `MODEL` 常量里，法定节假日表是同文件的 `HOLIDAYS_2026`，调整后重建即可。
+- 价格、峰谷时段、模型名白名单与显示名都写在 `src/index.ts` 的 `MODEL` 常量里，峰谷判定与法定节假日表在 `src/peak.ts`，host 与 client 共用，调整后重建即可。
+- 调试环色：浏览器控制台执行 `localStorage.setItem('dshcb.peakOverride', 'peak')` 强制高峰态，写 `offPeak` 强制低谷态，删掉该键回到按时刻自动判定；刷新页面立即生效，不刷新最迟一分钟。
 
 ## License
 
