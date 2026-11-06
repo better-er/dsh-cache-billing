@@ -11,6 +11,8 @@
 
 import * as React from 'react'
 
+import { isPeakBeijing } from './peak'
+
 /** 样式注入标识，防重复注入。 */
 const CSS_ID = 'dsh-cache-billing-css'
 
@@ -27,6 +29,9 @@ const CSS = `
 .dshcb_swatch{border-radius:2px;width:8px;height:8px;margin-right:6px;display:inline-block;flex:none}
 .dshcb_srows{margin:2px 0 0;padding:0 0 0 16px}
 .dshcb_foot{margin-top:6px;color:var(--dsw-alias-label-caption);font-size:11px;line-height:16px}
+/* 高峰时段把官方上下文圆环染成琥珀色，提示现在发请求按峰价计费；判定用当前时刻，与弹层里按事件计价的峰谷文案各管各的。 */
+html[data-dshcb-peak] button[aria-haspopup="dialog"][aria-label*="of context used"] svg circle:last-of-type,
+html[data-dshcb-peak] button[aria-haspopup="dialog"][aria-label*="上下文已用"] svg circle:last-of-type{stroke:var(--dsw-alias-state-warn-primary)}
 `
 
 /** 显示判定：默认全生效，不再按 provider 名过滤。任何 provider 只要报出用量，就按模型名匹配价目表显示估算金额，provider 为空时不显示。 */
@@ -343,6 +348,42 @@ export function startPanelBridge(): () => void {
   }
 }
 
+/** 高峰标记属性，挂在根元素上，只命中官方上下文圆环的进度圈。 */
+const PEAK_ATTR = 'data-dshcb-peak'
+
+/** 调试覆盖键：localStorage 写 peak 或 offPeak 可无视当前时刻强制环的颜色，写别的值或清掉即回到自动。 */
+export const PEAK_OVERRIDE_KEY = 'dshcb.peakOverride'
+
+/** 读出调试覆盖，没写或值不认识时返回 null，交给真实时刻判定。 */
+function peakOverride(): boolean | null {
+  if (typeof localStorage === 'undefined') return null
+  const raw = localStorage.getItem(PEAK_OVERRIDE_KEY)
+  if (raw === 'peak') return true
+  if (raw === 'offPeak') return false
+  return null
+}
+
+/** 按当前北京时刻同步高峰标记，官方圆环因此换色；调试覆盖优先。 */
+function syncPeakRing(): void {
+  if (typeof document === 'undefined') return
+  const root = document.documentElement
+  const override = peakOverride()
+  const peak = override === null ? isPeakBeijing(Date.now()) : override
+  if (peak) root.setAttribute(PEAK_ATTR, '')
+  else root.removeAttribute(PEAK_ATTR)
+}
+
+/** 启动高峰换色：立即判一次，此后每分钟重判，返回清理函数。 */
+export function startPeakRing(): () => void {
+  if (typeof document === 'undefined') return () => {}
+  syncPeakRing()
+  const timer = setInterval(syncPeakRing, 60_000)
+  return () => {
+    clearInterval(timer)
+    document.documentElement.removeAttribute(PEAK_ATTR)
+  }
+}
+
 /** 数据挂钩组件：props 由 slots 注入，useProjection 同官方条目。渲染为零尺寸占位，仅保持投影订阅存活并把数据镜像进模块级 store。 */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function CacheDataHook(props: any) {
@@ -377,6 +418,8 @@ export function apply(ctx: any): void {
   if (typeof document !== 'undefined') {
     startPanelBridge()
   }
+  // 高峰期给官方圆环换色，与插件同寿
+  ctx.effect(() => startPeakRing())
   // 数据挂钩仍走 slots：拿到 slots 注入的 useProjection，同官方条目的取数通道。
   ctx.slots.inject('conversation.input.right', () => {
     const dispose = ctx.slots.register(
